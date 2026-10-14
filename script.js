@@ -157,6 +157,9 @@ $('cameraStart').onclick=async()=>{
     if(shotExpired(attempt))return;
     const firstId=cameraStream.getVideoTracks()[0]?.getSettings()?.deviceId;
     try{
+      // iOS Safari potrafi zwrócić dwa strumienie, ale pierwszy obraz jest czarny.
+      // Na iPhone/iPad wykonujemy oba zdjęcia kolejno.
+      if(/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1))throw Error('iOS: sekwencyjny aparat');
       selfieStream=await openCamera('user',firstId);
       const secondId=selfieStream.getVideoTracks()[0]?.getSettings()?.deviceId;
       if(firstId&&secondId&&firstId===secondId)throw Error('Ta sama kamera');
@@ -167,7 +170,7 @@ $('cameraStart').onclick=async()=>{
     }catch(e){
       selfieStream?.getTracks().forEach(t=>t.stop());selfieStream=null;
       selfieVideo.hidden=true;dualMode=false;cameraStage=0;
-      camStatus.textContent='Dwie kamery jednocześnie są niedostępne. Zdjęcia wykonasz kolejno.';
+      camStatus.textContent='Najpierw zrób zdjęcie tylną kamerą, a następnie selfie.';
     }
     if(shotExpired(attempt))return;
     $('cameraPlaceholder').hidden=true;$('cameraStart').hidden=true;$('cameraRetake').hidden=false;
