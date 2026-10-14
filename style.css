@@ -28,3 +28,5 @@
 .shot-timer.urgent span{color:#ff819e}
 .camera-preview.camera-dual #selfieVideo{cursor:default}
 .camera-preview.camera-finished canvas{cursor:pointer}
+
+.discovery-hint{margin:13px 0 0!important;font-size:13px!important;color:#bda9d8!important;line-height:1.5!important}
