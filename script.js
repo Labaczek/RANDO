@@ -12,6 +12,23 @@ function requireAuth(){if(!configured){msg('Najpierw uzupełnij plik config.js i
 $('authBtn').onclick=async()=>{if(user){await db.auth.signOut();return}if(!configured){requireAuth();return}$('loginDialog').showModal()};
 $('authClose').onclick=()=>$('loginDialog').close();
 $('authSwitch').onclick=()=>{authMode=authMode==='login'?'register':'login';$('authTitle').textContent=authMode==='login'?'Zaloguj się':'Utwórz konto';$('authSubmit').textContent=authMode==='login'?'Zaloguj się':'Zarejestruj się';$('authSwitch').textContent=authMode==='login'?'Utwórz konto':'Mam już konto';$('authMsg').textContent=''};
+// RANDO: odzyskiwanie hasła — link dodawany do istniejącego okna logowania.
+const forgotLink=document.createElement('button');
+forgotLink.type='button';
+forgotLink.textContent='Nie pamiętasz hasła?';
+forgotLink.style.cssText='display:block;margin:12px auto 0;background:none;border:0;color:#c4a8ff;cursor:pointer;text-decoration:underline;font:inherit';
+$('authForm').append(forgotLink);
+forgotLink.onclick=async()=>{
+  if(!db){$('authMsg').textContent='Brak połączenia z Supabase.';return}
+  const email=$('email').value.trim();
+  if(!email){$('authMsg').textContent='Wpisz najpierw swój adres e-mail.';return}
+  forgotLink.disabled=true;
+  $('authMsg').textContent='Wysyłanie wiadomości...';
+  const redirectTo=new URL('reset-password.html',window.location.href).href;
+  const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo});
+  forgotLink.disabled=false;
+  $('authMsg').textContent=error?`Nie udało się wysłać wiadomości: ${error.message}`:'Jeśli konto istnieje, sprawdź pocztę i otwórz link do zmiany hasła.';
+};
 $('authForm').onsubmit=async e=>{e.preventDefault();if(!db)return;const email=$('email').value.trim(),password=$('password').value;$('authSubmit').disabled=true;$('authMsg').textContent='Proszę czekać...';const {data,error}=authMode==='register'?await db.auth.signUp({email,password}):await db.auth.signInWithPassword({email,password});$('authSubmit').disabled=false;if(error){$('authMsg').textContent=error.message;return}if(authMode==='register'&&!data.session){$('authMsg').textContent='Sprawdź pocztę i potwierdź adres e-mail, a potem się zaloguj.';return}$('loginDialog').close();$('authMsg').textContent='';};
 async function signed(path){if(!path)return null;const {data,error}=await db.storage.from('moments').createSignedUrl(path,120);if(error)throw error;return data.signedUrl}
 function setProfileFields(p){if(!p)return;for(const k of ['name','birthdate','occupation','goal','country','region','about'])if(p[k]!=null&&$(k))$(k).value=p[k];$('interests').value=(p.interests||[]).join(', ')}
