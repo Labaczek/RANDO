@@ -3,3 +3,19 @@
 
 /* RANDO live camera */
 .camera-shell{border:1px solid #58466f;border-radius:18px;padding:18px;background:#1c1428}.camera-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.camera-head span{font-size:12px;color:#b99bff;letter-spacing:2px}.camera-shell p{color:#c4b6d4}.camera-preview{background:#0b0911;border-radius:14px;overflow:hidden;min-height:220px;display:grid;place-items:center;position:relative}.camera-preview video,.camera-preview canvas{width:100%;max-height:540px;object-fit:contain;display:block}.camera-preview video[hidden],.camera-preview canvas[hidden]{display:none}.camera-preview #cameraPlaceholder{padding:60px 12px;color:#bdb1ca;text-align:center}.camera-controls{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.camera-controls button:disabled{opacity:.45;cursor:not-allowed}#cameraStatus{font-size:14px;color:#c4b5fd}
+
+/* Minimalistyczny podgląd RandoShot */
+.camera-shell .camera-head span,.camera-shell > p{display:none}
+.camera-preview{aspect-ratio:4/3;min-height:0;display:block;isolation:isolate}
+.camera-preview video,.camera-preview canvas{position:absolute;width:100%;height:100%;max-height:none;inset:0;object-fit:cover}
+.camera-preview #cameraVideo{z-index:1}
+.camera-preview #selfieVideo{z-index:2;inset:16px 16px auto auto;width:30%;height:38%;border:5px solid #a56bff;border-radius:26px;box-shadow:0 0 0 2px #e7d2ff55,0 10px 32px #0009,0 0 24px #8c4bff80}
+.camera-preview.camera-swapped #selfieVideo{z-index:1;inset:0;width:100%;height:100%;border:0;border-radius:0;box-shadow:none}
+.camera-preview.camera-swapped #cameraVideo{z-index:2;inset:16px 16px auto auto;width:30%;height:38%;border:5px solid #a56bff;border-radius:26px;box-shadow:0 0 0 2px #e7d2ff55,0 10px 32px #0009,0 0 24px #8c4bff80}
+.camera-preview canvas{z-index:3}
+.camera-preview #cameraPlaceholder{position:absolute;inset:0;display:grid;place-items:center}
+.camera-preview #cameraPlaceholder[hidden],.camera-preview video[hidden],.camera-preview canvas[hidden]{display:none}
+.camera-swap{position:absolute;z-index:4;right:18px;bottom:18px;border:1px solid #ffffff80;border-radius:50%;background:#2b1c45c9;color:#fff;font-size:24px;width:46px;height:46px;backdrop-filter:blur(8px)}
+.camera-swap[hidden]{display:none}
+.camera-preview.camera-dual #selfieVideo{cursor:pointer}
+@media(max-width:700px){.camera-preview #selfieVideo,.camera-preview.camera-swapped #cameraVideo{inset:10px 10px auto auto;border-width:3px;border-radius:18px}}
