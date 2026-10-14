@@ -19,3 +19,20 @@
 .camera-swap[hidden]{display:none}
 .camera-preview.camera-dual #selfieVideo{cursor:pointer}
 @media(max-width:700px){.camera-preview #selfieVideo,.camera-preview.camera-swapped #cameraVideo{inset:10px 10px auto auto;border-width:3px;border-radius:18px}}
+/* Poprawka daty urodzenia na iPhone */
+input[type="date"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+@media (max-width: 600px) {
+  input[type="date"] {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+}
