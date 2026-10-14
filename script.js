@@ -37,22 +37,36 @@ async function loadUserData(){if(!user)return;const [p,f]=await Promise.all([db.
 $('profileForm').onsubmit=async e=>{e.preventDefault();if(!requireAuth())return;const birth=$('birthdate').value;const age=new Date().getFullYear()-new Date(birth).getFullYear()-(new Date().toISOString().slice(5,10)<birth.slice(5)?1:0);if(age<18){$('profileMsg').textContent='RANDO jest tylko dla osób 18+.';return}const payload={id:user.id,name:$('name').value.trim(),birthdate:birth,occupation:$('occupation').value.trim(),goal:$('goal').value,country:$('country').value.trim().toUpperCase(),region:$('region').value.trim(),interests:$('interests').value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,12),about:$('about').value.trim()};const {error}=await db.from('profiles').upsert(payload);$('profileMsg').textContent=error?error.message:'✓ Profil zapisany';if(!error){profile=payload;msg('Profil zapisany. Możesz opublikować swój pierwszy moment.')}};
 $('settingsForm').onsubmit=async e=>{e.preventDefault();if(!requireAuth())return;const min=Number($('ageMin').value),max=Number($('ageMax').value);if(min<18||max>100||max<min){$('settingsMsg').textContent='Sprawdź przedział wieku.';return}const payload={user_id:user.id,area:$('area').value,goal:$('filterGoal').value,age_min:min,age_max:max,matching:document.querySelector('input[name="matching"]:checked').value};const {error}=await db.from('preferences').upsert(payload);$('settingsMsg').textContent=error?error.message:'✓ Filtry zapisane';if(!error)preferences=payload};
 
-// RANDO: podgląd dwóch kamer i fioletowe selfie. Bez galerii.
+// RANDO: BeReal-style sequential dual shot — one shutter, two cameras.
+// Mobile browsers generally cannot reliably run both cameras at once.
 let cameraStream=null, selfieStream=null, capturedMoment=null, rearFrame=null, selfieFrame=null;
 let cameraStage=0, swapped=false, dualMode=false, cameraBusy=false;
 let shotDeadline=0, shotTimerInterval=null, shotAttempt=0;
+const camVideo=$('cameraVideo'), selfieVideo=$('selfieVideo'), camCanvas=$('cameraResult');
+const camStatus=$('cameraStatus'), camPreview=$('cameraPreview'), swapButton=$('cameraSwap');
 const timerBox=$('shotTimer'), timerDisplay=$('shotCountdown');
 function stopShotTimer(){
   if(shotTimerInterval!==null)clearInterval(shotTimerInterval);
   shotTimerInterval=null;shotDeadline=0;timerBox.hidden=true;
 }
-function shotExpired(attempt){
-  return attempt!==shotAttempt || (shotDeadline>0 && Date.now()>=shotDeadline);
+function stopCamera(){
+  for(const stream of [cameraStream,selfieStream])stream?.getTracks().forEach(t=>t.stop());
+  cameraStream=null;selfieStream=null;
+  for(const video of [camVideo,selfieVideo]){video.pause();video.srcObject=null;video.hidden=true;}
+}
+function resetCamera(message='Aparat nieaktywny'){
+  shotAttempt++;stopShotTimer();stopCamera();
+  capturedMoment=null;rearFrame=null;selfieFrame=null;
+  cameraStage=0;swapped=false;dualMode=false;
+  camCanvas.hidden=true;camPreview.classList.remove('camera-finished','camera-dual','camera-swapped');
+  $('cameraPlaceholder').hidden=false;swapButton.hidden=true;
+  $('cameraStart').hidden=false;$('cameraRetake').hidden=true;$('cameraCapture').disabled=true;
+  $('cameraCapture').textContent='Zrób RandoShot';
+  camStatus.textContent=message;
 }
 function expireShot(attempt){
-  if(attempt!==shotAttempt || cameraStage===2)return;
-  resetCamera();
-  camStatus.textContent='⏰ RandoShot Time is over! Masz 2 minuty na wykonanie obu zdjęć. Spróbuj ponownie.';
+  if(attempt!==shotAttempt||cameraStage===2)return;
+  resetCamera('⏰ RandoShot Time is over! Spróbuj ponownie.');
 }
 function startShotTimer(){
   stopShotTimer();
@@ -68,46 +82,44 @@ function startShotTimer(){
   }
   tick();shotTimerInterval=setInterval(tick,200);
 }
-const camVideo=$('cameraVideo'), selfieVideo=$('selfieVideo'), camCanvas=$('cameraResult');
-const camStatus=$('cameraStatus'), camPreview=$('cameraPreview'), swapButton=$('cameraSwap');
-function stopCamera(){
-  for(const stream of [cameraStream,selfieStream]) stream?.getTracks().forEach(t=>t.stop());
-  cameraStream=null;selfieStream=null;
-  for(const video of [camVideo,selfieVideo]){video.pause();video.srcObject=null;video.hidden=true;}
+function validAttempt(attempt){
+  if(attempt!==shotAttempt)return false;
+  if(!shotDeadline||Date.now()>=shotDeadline){expireShot(attempt);return false;}
+  return true;
 }
 function cameraErrorMessage(error){
   switch(error?.name){
-    case 'NotAllowedError': return 'Zezwól na dostęp do aparatu w przeglądarce.';
-    case 'NotFoundError': return 'Nie znaleziono aparatu na tym urządzeniu.';
-    case 'NotReadableError': return 'Aparat jest zajęty przez inną aplikację.';
-    default: return 'Nie udało się uruchomić aparatu: '+(error?.message||'nieznany błąd');
+    case 'NotAllowedError':return 'Zezwól na dostęp do aparatu w ustawieniach przeglądarki.';
+    case 'NotFoundError':return 'Nie znaleziono odpowiedniej kamery.';
+    case 'NotReadableError':return 'Aparat jest zajęty. Zamknij inne aplikacje korzystające z aparatu.';
+    default:return error?.message||'Nie udało się uruchomić aparatu.';
   }
 }
-async function openCamera(facing,excludeId=null){
-  const options=[{video:{facingMode:{ideal:facing}},audio:false}];
-  if(excludeId){
-    const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
-    const alternative=devices.find(d=>d.deviceId && d.deviceId!==excludeId);
-    if(alternative) options.unshift({video:{deviceId:{exact:alternative.deviceId}},audio:false});
-  }
-  options.push({video:true,audio:false});
-  let lastError;
-  for(const option of options){
-    try{return await navigator.mediaDevices.getUserMedia(option)}
-    catch(e){lastError=e;if(e.name==='NotAllowedError')break;}
-  }
-  throw lastError;
+async function openCamera(facing){
+  // exact prevents silently using the rear camera for the selfie (or vice versa).
+  return navigator.mediaDevices.getUserMedia({
+    audio:false,video:{facingMode:{exact:facing},width:{ideal:1280},height:{ideal:960}}
+  });
 }
-async function attachVideo(video,stream){
+async function attachVideo(video,stream,attempt){
   video.srcObject=stream;video.hidden=false;
   await video.play();
-}
-function showCameraLayout(){
-  camPreview.classList.toggle('camera-swapped',swapped);
-  camPreview.classList.toggle('camera-dual',dualMode);
+  if(!validAttempt(attempt))return false;
+  // iOS Safari may resolve play() before a real camera frame is available.
+  await new Promise((resolve,reject)=>{
+    let settled=false;
+    const done=(err)=>{if(settled)return;settled=true;clearInterval(poll);clearTimeout(timeout);err?reject(err):resolve();};
+    const poll=setInterval(()=>{
+      if(attempt!==shotAttempt){done(Error('Próba została anulowana.'));return;}
+      if(video.readyState>=HTMLMediaElement.HAVE_CURRENT_DATA&&video.videoWidth>0&&video.videoHeight>0)done();
+    },80);
+    const timeout=setTimeout(()=>done(Error('Aparat nie przesłał obrazu. Spróbuj ponownie.')),7000);
+  });
+  return validAttempt(attempt);
 }
 function captureFrame(video){
-  if(!video.videoWidth || !video.videoHeight) throw Error('Poczekaj na obraz z kamery.');
+  if(video.readyState<HTMLMediaElement.HAVE_CURRENT_DATA||!video.videoWidth||!video.videoHeight)
+    throw Error('Poczekaj na obraz z kamery.');
   const c=document.createElement('canvas');c.width=video.videoWidth;c.height=video.videoHeight;
   c.getContext('2d').drawImage(video,0,0,c.width,c.height);return c;
 }
@@ -132,17 +144,11 @@ async function saveRandoShot(){
   if(!capturedMoment)throw Error('Nie udało się przygotować zdjęcia.');
 }
 function showResult(){
-  stopShotTimer();stopCamera();camCanvas.hidden=false;camPreview.classList.add('camera-finished');
-  swapButton.hidden=false;cameraStage=2;$('cameraCapture').disabled=true;
-  camStatus.textContent='✓ RandoShot gotowy.';
-}
-async function resetCamera(){
-  shotAttempt++;stopShotTimer();stopCamera();capturedMoment=null;rearFrame=null;selfieFrame=null;
-  cameraStage=0;swapped=false;dualMode=false;
-  camCanvas.hidden=true;camPreview.classList.remove('camera-finished','camera-dual','camera-swapped');
-  $('cameraPlaceholder').hidden=false;swapButton.hidden=true;
-  $('cameraStart').hidden=false;$('cameraRetake').hidden=true;$('cameraCapture').disabled=true;
-  $('cameraCapture').textContent='Zrób zdjęcie';camStatus.textContent='Aparat nieaktywny';
+  stopShotTimer();stopCamera();cameraStage=2;
+  camCanvas.hidden=false;camPreview.classList.add('camera-finished');
+  $('cameraPlaceholder').hidden=true;swapButton.hidden=true;
+  $('cameraCapture').disabled=true;$('cameraRetake').hidden=false;
+  camStatus.textContent='✓ RandoShot gotowy. Dotknij zdjęcia, aby zamienić ujęcia.';
 }
 $('cameraStart').onclick=async()=>{
   if(cameraBusy)return;
@@ -150,69 +156,70 @@ $('cameraStart').onclick=async()=>{
     camStatus.textContent='Aparat wymaga HTTPS i obsługiwanej przeglądarki.';return;
   }
   cameraBusy=true;$('cameraStart').disabled=true;
+  resetCamera();startShotTimer();
+  const attempt=shotAttempt;
   try{
-    await resetCamera();startShotTimer();const attempt=shotAttempt;camStatus.textContent='Uruchamianie aparatu…';
-    cameraStream=await openCamera('environment');
-    await attachVideo(camVideo,cameraStream);
-    if(shotExpired(attempt))return;
-    const firstId=cameraStream.getVideoTracks()[0]?.getSettings()?.deviceId;
-    try{
-      // iOS Safari potrafi zwrócić dwa strumienie, ale pierwszy obraz jest czarny.
-      // Na iPhone/iPad wykonujemy oba zdjęcia kolejno.
-      if(/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1))throw Error('iOS: sekwencyjny aparat');
-      selfieStream=await openCamera('user',firstId);
-      const secondId=selfieStream.getVideoTracks()[0]?.getSettings()?.deviceId;
-      if(firstId&&secondId&&firstId===secondId)throw Error('Ta sama kamera');
-      await attachVideo(selfieVideo,selfieStream);
-      if(shotExpired(attempt))return;
-      dualMode=true;
-      camStatus.textContent='';cameraStage=0;swapButton.hidden=true;
-    }catch(e){
-      selfieStream?.getTracks().forEach(t=>t.stop());selfieStream=null;
-      selfieVideo.hidden=true;dualMode=false;cameraStage=0;
-      camStatus.textContent='Najpierw zrób zdjęcie tylną kamerą, a następnie selfie.';
-    }
-    if(shotExpired(attempt))return;
-    $('cameraPlaceholder').hidden=true;$('cameraStart').hidden=true;$('cameraRetake').hidden=false;
-    $('cameraCapture').disabled=false;showCameraLayout();
-  }catch(e){const errorMessage=cameraErrorMessage(e);if(shotDeadline){await resetCamera();camStatus.textContent=errorMessage}}
-  finally{if(!shotDeadline&&cameraStage!==2)stopCamera();cameraBusy=false;$('cameraStart').disabled=false;}
+    camStatus.textContent='Uruchamianie tylnej kamery…';
+    const stream=await openCamera('environment');
+    if(!validAttempt(attempt)){stream.getTracks().forEach(t=>t.stop());return;}
+    cameraStream=stream;
+    if(!await attachVideo(camVideo,stream,attempt))return;
+    if(!validAttempt(attempt))return;
+    $('cameraPlaceholder').hidden=true;$('cameraStart').hidden=true;
+    $('cameraRetake').hidden=false;$('cameraCapture').disabled=false;
+    camStatus.textContent='Gotowy? Jedno kliknięcie zrobi dwa zdjęcia — tył, potem selfie.';
+  }catch(e){if(attempt===shotAttempt)resetCamera(cameraErrorMessage(e));}
+  finally{cameraBusy=false;$('cameraStart').disabled=false;}
 };
 $('cameraCapture').onclick=async()=>{
-  if(cameraBusy||!shotDeadline||Date.now()>=shotDeadline){if(shotDeadline)expireShot(shotAttempt);return;}
-  cameraBusy=true;const attempt=shotAttempt;$('cameraCapture').disabled=true;
+  if(cameraBusy||cameraStage===2)return;
+  const attempt=shotAttempt;
+  if(!validAttempt(attempt))return;
+  cameraBusy=true;$('cameraCapture').disabled=true;
   try{
-    if(dualMode){
-      rearFrame=captureFrame(camVideo);selfieFrame=captureFrame(selfieVideo);
-      await saveRandoShot();if(!shotExpired(attempt))showResult();
-    }else if(cameraStage===0){
+    if(cameraStage===0){
       rearFrame=captureFrame(camVideo);
-      const firstId=cameraStream?.getVideoTracks()[0]?.getSettings()?.deviceId;
+      cameraStage=1;
+      camStatus.textContent='Teraz selfie! Przełączanie kamery…';
+      // Stop rear camera completely before asking Safari for front camera.
       stopCamera();
-      cameraStream=await openCamera('user',firstId);
-      await attachVideo(camVideo,cameraStream);
-      if(shotExpired(attempt))return;
-      cameraStage=1;$('cameraCapture').textContent='Zrób selfie';
-      camStatus.textContent='';$('cameraCapture').disabled=false;
+      if(!validAttempt(attempt))return;
+      const stream=await openCamera('user');
+      if(!validAttempt(attempt)){stream.getTracks().forEach(t=>t.stop());return;}
+      cameraStream=stream;
+      if(!await attachVideo(camVideo,stream,attempt))return;
+      if(!validAttempt(attempt))return;
+      camStatus.textContent='Uśmiech! Robimy selfie…';
+      // Brief preview for framing; user does not need a second shutter tap.
+      await new Promise(resolve=>setTimeout(resolve,900));
+      if(!validAttempt(attempt))return;
+      selfieFrame=captureFrame(camVideo);
     }else if(cameraStage===1){
       selfieFrame=captureFrame(camVideo);
-      await saveRandoShot();if(!shotExpired(attempt))showResult();
     }
-  }catch(e){camStatus.textContent=cameraErrorMessage(e);if(cameraStage<2)$('cameraCapture').disabled=false;}
-  finally{cameraBusy=false;}
+    if(!validAttempt(attempt))return;
+    await saveRandoShot();
+    if(attempt===shotAttempt && validAttempt(attempt))showResult();
+  }catch(e){
+    if(attempt===shotAttempt && shotDeadline){
+      camStatus.textContent='Nie udało się zrobić selfie: '+cameraErrorMessage(e)+' Kliknij „Zrób selfie” ponownie.';
+      if(cameraStage===1){
+        $('cameraCapture').textContent='Zrób selfie';
+        $('cameraCapture').disabled=false;
+      }else resetCamera(cameraErrorMessage(e));
+    }
+  }finally{cameraBusy=false;}
 };
 async function swapImages(){
   if(cameraStage!==2||!rearFrame||!selfieFrame)return;
-  swapped=!swapped;
-  showCameraLayout();
+  swapped=!swapped;drawRandoShot();
   await saveRandoShot();
-  camCanvas.hidden=false;
 }
-swapButton.onclick=swapImages;
-camPreview.onclick=e=>{if(e.target===swapButton)return;if(cameraStage===2)swapImages();};
-$('cameraRetake').onclick=resetCamera;
+swapButton.hidden=true;
+camPreview.onclick=()=>{if(cameraStage===2)swapImages();};
+$('cameraRetake').onclick=()=>resetCamera();
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>{
-  if(b.dataset.page!=='moment'&&(cameraStream||selfieStream||shotDeadline))resetCamera();
+  if(b.dataset.page!=='moment'&&(cameraStream||shotDeadline))resetCamera();
 }));
 $('momentForm').onsubmit=async e=>{e.preventDefault();if(!requireAuth())return;if(!profile){$('momentMsg').textContent='Najpierw zapisz swój profil.';page('profile');return}const file=capturedMoment;if(!file||file.size>5*1024*1024){$('momentMsg').textContent='Najpierw wykonaj oba zdjęcia aparatem (maks. 5 MB).';return}const caption=$('caption').value.trim();if(!caption)return;const {data:existing}=await db.from('moments').select('id').eq('user_id',user.id).eq('day',new Date().toISOString().slice(0,10)).maybeSingle();if(existing){$('momentMsg').textContent='Dzisiaj już opublikowano RandoShot.';return}const ext={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'}[file.type],path=`${user.id}/${crypto.randomUUID()}.${ext}`;$('momentMsg').textContent='Wysyłanie zdjęcia...';const upload=await db.storage.from('moments').upload(path,file,{contentType:file.type,upsert:false});if(upload.error){$('momentMsg').textContent=upload.error.message;return}const insert=await db.from('moments').insert({user_id:user.id,photo_path:path,caption});if(insert.error){await db.storage.from('moments').remove([path]);$('momentMsg').textContent=insert.error.message;return}$('momentMsg').textContent='✓ RandoShot opublikowany!';$('momentForm').reset();$('cameraRetake').click();loadMyMoment()};
 async function loadMyMoment(){
